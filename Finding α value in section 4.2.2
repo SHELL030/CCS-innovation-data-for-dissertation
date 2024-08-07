@@ -1,0 +1,55 @@
+* First import the data
+* Pt is the actual carbon price, and Ey_t is the expected number of low-carbon technology patents.
+
+* Generate data at time t-104 (2 years ago = 104 weeks ago)
+gen pt_104 = pt[_n-104] *pt_104: carbon price 2 years ago
+gen zt_104 = zt[_n-104] *zt_104: number of new other clean tech patent 2 years ago
+gen Ey_t_104 = Ey_t[_n-104] *Ey_t_104: number of new CCS patent 2 years ago
+
+* Delete invalid data from t-104 to t
+drop if missing(pt_104) | missing(Ey_t_104) | missing(zt_104)
+
+* Initialize the predicted price
+gen p_tilde = pt *p_tilde: expected carbon price, pt: real carbon price
+replace p_tilde = . in 2/L
+
+*Create alpha (a) and AIC (aic), create matrix AIC_values for result storage and m to indicate the row of matrix
+gen a = 0.01
+gen m = 1
+matrix AIC_values = J(101, 2, 0)
+gen aic = 1
+gen lnEyt = log(Ey_t_104)
+gen lnzt = log(zt_104)
+
+
+* Start loop, update predicted price, run negative binomial regression model, and calculate AIC
+while a <= 1 {
+    display "current alpha value " a
+
+    forvalues i = 2/`=_N' {
+        replace p_tilde = p_tilde[_n-1] + a * (pt¬_104[_n-1] - p_tilde[_n-1]) in `i'
+    }
+
+    glm lnEyt p_tilde lnzt, family(nb)
+
+*The value of variable a is stored in the scalar variable b (the mean value is used because a has only one value), because only the values of scalar variables can be stored in the matrix AIC_values.
+	summarize a, meanonly
+	scalar b = r(mean) 
+
+matrix AIC_values[m, 1] = b
+matrix AIC_values[m, 2] = e(aic)
+
+    replace a = a + 0.01
+    replace m = m +1
+
+    if a > 1 {
+        display "The loop ends because the value of alpha exceeds 1.0"
+        break
+    }
+}
+
+* Display result and transfer it to an excel file
+matrix list AIC_values
+matrix AIC_values_as_data = AIC_values
+putexcel set "AIC_values.xlsx", replace
+putexcel A1 = matrix(AIC_values)
